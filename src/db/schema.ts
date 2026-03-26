@@ -12,3 +12,10 @@ export const attendances = sqlserverTable("attendances", {
   clockIn: datetime("clock_in"),
   status: varchar("status", { length: 50 }),
 });
+
+export const submissions = sqlserverTable("submissions", {
+  id: serial("id").primaryKey(),
+  reason: varchar("reason", { length: 1000 }),
+  valid: varchar("valid", { length: 10 }), // "true" / "false"
+  createdAt: datetime("created_at"),
+});

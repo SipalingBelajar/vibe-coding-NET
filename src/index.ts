@@ -1,38 +1,61 @@
 import { Elysia, t } from "elysia";
-import { AntigravityEngine } from "./engines/AntigravityEngine";
-
-const engine = new AntigravityEngine(process.env.GOOGLE_GEMINI_API_KEY || "");
+import { swagger } from "@elysiajs/swagger";
+import { Antigravity } from "./engine/antigravity";
+import { db } from "./db";
+import { attendances, submissions } from "./db/schema";
 
 const app = new Elysia()
-  .get("/", () => ({ status: "online", message: "Antigravity Engine Active" }))
+  .use(swagger({
+    path: '/docs',
+    documentation: {
+      info: {
+        title: 'SCD Smart Attendance API',
+        version: '1.0.0'
+      }
+    }
+  }))
+  .get("/", () => ({ status: "online", message: "SCD Smart Attendance Active" }))
   .group("/api/v1", (group) =>
     group
-      .onBeforeHandle(({ set, headers }) => {
-        // Shielding Pattern: Validate GeoFence for all /api/v1 routes
-        const lat = parseFloat(headers["x-latitude"] || "");
-        const lon = parseFloat(headers["x-longitude"] || "");
-
-        if (isNaN(lat) || isNaN(lon)) {
+      .post("/attendance/check-in", async ({ body, set }) => {
+        const { userId, lat, lng } = body;
+        
+        const geoCheck = Antigravity.validateRequest(lat, lng);
+        if (!geoCheck.allowed) {
           set.status = 403;
-          return "Luar Jangkauan (Coordinates Missing)";
+          return { error: geoCheck.message };
         }
 
-        if (!engine.validateGeoFence(lat, lon)) {
-          set.status = 403;
-          return "Luar Jangkauan";
-        }
+        // Save to Database
+        await db.insert(attendances).values({
+          userId: userId,
+          clockIn: new Date(),
+          status: "Present"
+        });
+
+        return { status: "success", message: "Check-in successful" };
+      }, {
+        body: t.Object({
+          userId: t.Number(),
+          lat: t.Number(),
+          lng: t.Number()
+        })
       })
-      .post("/leave", async ({ body, set }) => {
-        const { reason } = body as { reason: string };
-        const filterResult = await engine.smartFilter(reason);
-
-        if (!filterResult.isProfessional) {
+      .post("/submission/leave", async ({ body, set }) => {
+        const { reason } = body;
+        
+        const reasonCheck = await Antigravity.checkReason(reason);
+        if (!reasonCheck.valid) {
           set.status = 400;
-          return {
-            error: "Unprofessional Content Detected",
-            reason: filterResult.reason,
-          };
+          return { error: "Alasan tidak sopan atau tidak profesional!" };
         }
+
+        // Save to Database
+        await db.insert(submissions).values({
+          reason: reason,
+          valid: "true",
+          createdAt: new Date()
+        });
 
         return { status: "success", message: "Leave request submitted" };
       }, {
@@ -44,5 +67,6 @@ const app = new Elysia()
   .listen(3000);
 
 console.log(
-  `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
+  `🚀 SCD Smart Attendance is running at ${app.server?.hostname}:${app.server?.port}`
 );
+console.log(`📑 Swagger docs available at http://localhost:3000/docs`);
